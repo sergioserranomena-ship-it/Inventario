@@ -365,10 +365,20 @@
       </div>
       <div class="table-wrap">
         <div class="table-header"><h3>⚠️ Alertas de Reaprovisionamiento (Top 50)</h3></div>
-        <table id="tbl-alerts"><thead><tr>
-          <th>SKU</th><th>Descripción</th><th>Categoría</th><th>Sub-Categoría</th><th>Clase</th>
-          <th>Stock</th><th>Venta/Día</th><th>DOI Actual</th><th>DOI Objetivo</th><th>Estado</th><th class="text-right">Compra Sugerida</th>
-        </tr></thead><tbody id="tbody-alerts"></tbody></table>
+        <div class="table-scroll"><table id="tbl-alerts" style="min-width:1100px;"><thead><tr>
+          <th data-asort="Articulo">SKU <span class="sort-arrow">↕</span></th>
+          <th data-asort="DESCRIPCION">Descripción <span class="sort-arrow">↕</span></th>
+          <th data-asort="Categoria">Categoría <span class="sort-arrow">↕</span></th>
+          <th data-asort="Subcategoria">Sub-Categoría <span class="sort-arrow">↕</span></th>
+          <th data-asort="clase">Clase <span class="sort-arrow">↕</span></th>
+          <th data-asort="stock" class="text-right">Stock <span class="sort-arrow">↕</span></th>
+          <th data-asort="ventaDia" class="text-right">Venta/Día <span class="sort-arrow">↕</span></th>
+          <th data-asort="doi" class="text-right">DOI Actual <span class="sort-arrow">↕</span></th>
+          <th data-asort="doiObjetivo" class="text-right">DOI Objetivo <span class="sort-arrow">↕</span></th>
+          <th data-asort="status">Estado <span class="sort-arrow">↕</span></th>
+          <th data-asort="compra" class="text-right">Compra (u) <span class="sort-arrow">↕</span></th>
+          <th data-asort="compraUSD" class="text-right">Compra USD <span class="sort-arrow">↕</span></th>
+        </tr></thead><tbody id="tbody-alerts"></tbody></table></div>
       </div>
     </div>
 
@@ -562,6 +572,9 @@ let INV_PAGE = 1, INV_PAGE_SIZE = 50;
 let ABCD_PAGE = 1, ABCD_PAGE_SIZE = 50;
 let PROJ_INPUTS = {}; // keyed by filterKey -> { invU, invUSD, ventas:{[month]:{u,usd}}, byMonth, months }
 let INV_SORT = { col: 'clase', dir: 1 };
+let ALERTS_DATA = [];
+let ALERTS_SORT = { col: 'status', dir: 1 };
+let OTB_SKU_SORT = { col: 'compraUSD', dir: -1 };
 let invFiltered = [];
 let abcdFiltered = [];
 let charts = {};
@@ -1088,13 +1101,19 @@ function renderAbcdSalesChart(d) {
   });
 }
 
-function renderAlertsTable(d) {
-  const rows = d.filter(r => ['agotado','critico','bajo'].includes(r.status))
-    .sort((a,b) => { const p = {agotado:0,critico:1,bajo:2}; return (p[a.status]-p[b.status]) || (b.ventaUSDtotal - a.ventaUSDtotal); })
-    .slice(0, 50);
-  document.getElementById('tbody-alerts').innerHTML = rows.map(r => `<tr>
+function sortAndRenderAlerts() {
+  const col = ALERTS_SORT.col, dir = ALERTS_SORT.dir;
+  const statusP = {agotado:0,critico:1,bajo:2};
+  const sorted = [...ALERTS_DATA].sort((a,b) => {
+    let va = a[col], vb = b[col];
+    if (col === 'status') { va = statusP[a.status]??9; vb = statusP[b.status]??9; }
+    if (col === 'doi') { va = a.doi ?? 9999; vb = b.doi ?? 9999; }
+    if (typeof va === 'string') return dir * va.localeCompare(vb);
+    return dir * ((va||0) - (vb||0));
+  });
+  document.getElementById('tbody-alerts').innerHTML = sorted.map(r => `<tr>
     <td><span class="tag">${r.Articulo}</span></td>
-    <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;" title="${r.DESCRIPCION}">${r.DESCRIPCION}</td>
+    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;" title="${r.DESCRIPCION}">${r.DESCRIPCION}</td>
     <td>${r.Categoria}</td><td>${r.Subcategoria}</td>
     <td>${badgeClase(r.clase)}</td>
     <td class="text-right bold">${r.stock.toLocaleString()}</td>
@@ -1102,8 +1121,31 @@ function renderAlertsTable(d) {
     <td class="text-right ${doiColor(r.doi, r.doiObjetivo)}">${r.doi === null ? '∞' : r.doi}</td>
     <td class="text-right">${r.doiObjetivo}</td>
     <td class="${'status-'+r.status}">${statusLabel(r.status)}</td>
-    <td class="text-right bold text-green">${r.compra > 0 ? r.compra.toLocaleString() + ' u' : '—'}</td>
+    <td class="text-right bold">${r.compra > 0 ? r.compra.toLocaleString() : '—'}</td>
+    <td class="text-right bold text-green">${r.compraUSD > 0 ? '$'+fmtUSD(r.compraUSD) : '—'}</td>
   </tr>`).join('');
+  // Update sort arrows
+  document.querySelectorAll('#tbl-alerts th[data-asort]').forEach(th => {
+    const arrow = th.querySelector('.sort-arrow');
+    if (!arrow) return;
+    arrow.textContent = th.dataset.asort === col ? (dir===1?'↑':'↓') : '↕';
+    th.classList.toggle('sorted', th.dataset.asort === col);
+  });
+}
+
+function renderAlertsTable(d) {
+  ALERTS_DATA = d.filter(r => ['agotado','critico','bajo'].includes(r.status)).slice(0, 200);
+  sortAndRenderAlerts();
+  // Wire header clicks (once)
+  document.querySelectorAll('#tbl-alerts th[data-asort]').forEach(th => {
+    th.style.cursor = 'pointer';
+    th.onclick = () => {
+      const c = th.dataset.asort;
+      ALERTS_SORT.dir = ALERTS_SORT.col === c ? ALERTS_SORT.dir * -1 : 1;
+      ALERTS_SORT.col = c;
+      sortAndRenderAlerts();
+    };
+  });
 }
 
 // ===================== INVENTARIO TABLE =====================
@@ -1375,10 +1417,26 @@ function renderCompras(view) {
         <div class="spacer"></div>
         <span id="otb-count" style="color:var(--text2);font-size:12px;"></span>
       </div>
-      <table id="tbl-otb-sku">
-        <thead><tr><th>SKU</th><th>Descripción</th><th>Categoría</th><th>Sub-Categoría</th><th>Marca</th><th>Grupo</th><th>Grupo Presup.</th><th>Proveedor</th><th>Clase</th><th class="text-right">Stock</th><th class="text-right">Vta/Día</th><th class="text-right">DOI</th><th>Estado</th><th class="text-right">Compra (u)</th><th class="text-right">Valor USD</th></tr></thead>
+      <div class="table-scroll"><table id="tbl-otb-sku" style="min-width:1400px;">
+        <thead><tr>
+          <th data-osort="Articulo">SKU <span class="sort-arrow">↕</span></th>
+          <th data-osort="DESCRIPCION">Descripción <span class="sort-arrow">↕</span></th>
+          <th data-osort="Categoria">Categoría <span class="sort-arrow">↕</span></th>
+          <th data-osort="Subcategoria">Sub-Categoría <span class="sort-arrow">↕</span></th>
+          <th data-osort="MARCA">Marca <span class="sort-arrow">↕</span></th>
+          <th data-osort="GRUPO">Grupo <span class="sort-arrow">↕</span></th>
+          <th data-osort="Grupo Presupuestario">Grupo Presup. <span class="sort-arrow">↕</span></th>
+          <th data-osort="Supplier">Proveedor <span class="sort-arrow">↕</span></th>
+          <th data-osort="clase">Clase <span class="sort-arrow">↕</span></th>
+          <th data-osort="stock" class="text-right">Stock <span class="sort-arrow">↕</span></th>
+          <th data-osort="ventaDia" class="text-right">Vta/Día <span class="sort-arrow">↕</span></th>
+          <th data-osort="doi" class="text-right">DOI <span class="sort-arrow">↕</span></th>
+          <th data-osort="status">Estado <span class="sort-arrow">↕</span></th>
+          <th data-osort="compra" class="text-right">Compra (u) <span class="sort-arrow">↕</span></th>
+          <th data-osort="compraUSD" class="text-right sorted">Valor USD <span class="sort-arrow">↓</span></th>
+        </tr></thead>
         <tbody id="tbody-otb-sku"></tbody>
-      </table></div>`;
+      </table></div></div>`;
 
     function applyOtbFilters() {
       const s   = document.getElementById('otb-search').value.toLowerCase();
@@ -1386,6 +1444,7 @@ function renderCompras(view) {
       const m   = document.getElementById('otb-marca').value;
       const g   = document.getElementById('otb-grupo').value;
       const gp  = document.getElementById('otb-grupopres').value;
+      const col = OTB_SKU_SORT.col, dir = OTB_SKU_SORT.dir;
       const filtered = base.filter(r => {
         if (s  && !r.Articulo.toLowerCase().includes(s) && !r.DESCRIPCION.toLowerCase().includes(s)) return false;
         if (c  && r.Categoria !== c) return false;
@@ -1393,7 +1452,12 @@ function renderCompras(view) {
         if (g  && r.GRUPO !== g) return false;
         if (gp && r['Grupo Presupuestario'] !== gp) return false;
         return true;
-      }).sort((a,b) => b.compraUSD - a.compraUSD);
+      }).sort((a,b) => {
+        let va = a[col] ?? 0, vb = b[col] ?? 0;
+        if (col === 'doi') { va = a.doi ?? 9999; vb = b.doi ?? 9999; }
+        if (typeof va === 'string') return dir * va.localeCompare(vb);
+        return dir * (va - vb);
+      });
       document.getElementById('otb-count').textContent = `${filtered.length} SKUs`;
       document.getElementById('tbody-otb-sku').innerHTML = filtered.slice(0,300).map(r=>`<tr>
         <td><span class="tag">${r.Articulo}</span></td>
@@ -1409,12 +1473,31 @@ function renderCompras(view) {
         <td class="text-right bold">${r.compra.toLocaleString()}</td>
         <td class="text-right bold text-green">$${fmtUSD(r.compraUSD)}</td>
       </tr>`).join('');
+      // Update sort arrows
+      document.querySelectorAll('#tbl-otb-sku th[data-osort]').forEach(th => {
+        const arrow = th.querySelector('.sort-arrow');
+        if (!arrow) return;
+        arrow.textContent = th.dataset.osort === col ? (dir===1?'↑':'↓') : '↕';
+        th.classList.toggle('sorted', th.dataset.osort === col);
+      });
     }
 
     ['otb-search','otb-cat','otb-marca','otb-grupo','otb-grupopres'].forEach(id => {
       const el = document.getElementById(id);
       el.addEventListener(id==='otb-search'?'input':'change', applyOtbFilters);
     });
+    // Wire header sort clicks
+    setTimeout(() => {
+      document.querySelectorAll('#tbl-otb-sku th[data-osort]').forEach(th => {
+        th.style.cursor = 'pointer';
+        th.onclick = () => {
+          const c = th.dataset.osort;
+          OTB_SKU_SORT.dir = OTB_SKU_SORT.col === c ? OTB_SKU_SORT.dir * -1 : -1;
+          OTB_SKU_SORT.col = c;
+          applyOtbFilters();
+        };
+      });
+    }, 0);
     applyOtbFilters();
   }
 }
