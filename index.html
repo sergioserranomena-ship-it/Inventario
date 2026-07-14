@@ -478,14 +478,21 @@
           <div class="spacer"></div>
           <span id="abcd-count" style="color:var(--text2);font-size:12px;"></span>
         </div>
-        <table>
+        <div class="table-scroll"><table id="tbl-abcd" style="min-width:900px;">
           <thead><tr>
-            <th>#</th><th>SKU</th><th>Descripción</th><th>Categoría</th><th>Subcategoría</th>
-            <th class="text-right">Unidades/Año</th><th class="text-right">Venta USD/Año</th>
-            <th class="text-right">% Ventas</th><th class="text-right">% Acum.</th><th>Clase</th>
+            <th data-acol="rank">#  <span class="sort-arrow">↕</span></th>
+            <th data-acol="Articulo">SKU <span class="sort-arrow">↕</span></th>
+            <th data-acol="DESCRIPCION">Descripción <span class="sort-arrow">↕</span></th>
+            <th data-acol="Categoria">Categoría <span class="sort-arrow">↕</span></th>
+            <th data-acol="Subcategoria">Subcategoría <span class="sort-arrow">↕</span></th>
+            <th data-acol="ventaUnidadesTotal" class="text-right">Unidades/Año <span class="sort-arrow">↕</span></th>
+            <th data-acol="ventaUSDtotal" class="text-right sorted">Venta USD/Año <span class="sort-arrow">↓</span></th>
+            <th data-acol="pctVentas" class="text-right">% Ventas <span class="sort-arrow">↕</span></th>
+            <th data-acol="pctAcum" class="text-right">% Acum. <span class="sort-arrow">↕</span></th>
+            <th data-acol="clase">Clase <span class="sort-arrow">↕</span></th>
           </tr></thead>
           <tbody id="tbody-abcd"></tbody>
-        </table>
+        </table></div>
         <div class="pagination" id="abcd-pagination"></div>
       </div>
     </div>
@@ -575,6 +582,14 @@ let INV_SORT = { col: 'clase', dir: 1 };
 let ALERTS_DATA = [];
 let ALERTS_SORT = { col: 'status', dir: 1 };
 let OTB_SKU_SORT = { col: 'compraUSD', dir: -1 };
+let ABCD_SORT = { col: 'ventaUSDtotal', dir: -1 };
+let PIPE_SORT = {
+  consolidado: { col: 'pipelineTotal', dir: -1 },
+  transito:    { col: 'ETA', dir: 1 },
+  fiscal:      { col: 'ETA', dir: 1 },
+  oa:          { col: 'ETA', dir: 1 },
+  timeline:    { col: 'mes', dir: 1 }
+};
 let invFiltered = [];
 let abcdFiltered = [];
 let charts = {};
@@ -592,6 +607,18 @@ document.querySelectorAll('#main-nav button').forEach(btn => {
     if (sec === 'abcd') renderAbcd();
     if (sec === 'config') renderConfig();
   });
+});
+
+// Pipeline sort — global delegated click handler for data-psort headers
+document.addEventListener('click', e => {
+  const th = e.target.closest('th[data-psort]');
+  if (!th) return;
+  const col = th.dataset.psort;
+  const vk  = th.dataset.pview;
+  if (!vk || !PIPE_SORT[vk]) return;
+  PIPE_SORT[vk].dir = PIPE_SORT[vk].col === col ? PIPE_SORT[vk].dir * -1 : 1;
+  PIPE_SORT[vk].col = col;
+  renderPipeline(vk);
 });
 
 // Inner tabs compras
@@ -970,6 +997,7 @@ function renderDashboard() {
   const bajos = d.filter(r => r.status === 'bajo').length;
   const conStock = d.filter(r => r.stock > 0).length;
   const skusA = d.filter(r => r.clase === 'A').length;
+  const skusNuncaVendido = d.filter(r => r.stock > 0 && r.ventaUnidadesTotal === 0).length;
 
   const totalTransito = d.reduce((s,r)=>s+r.unitsTransito,0);
   const totalFiscal   = d.reduce((s,r)=>s+r.unitsFiscal,0);
@@ -977,21 +1005,25 @@ function renderDashboard() {
   const totalPipeUSD  = d.reduce((s,r)=>s+r.valorPipelineUSD,0);
   const hasPipeline   = totalTransito+totalFiscal+totalOA > 0;
 
-  // Fila 1: Pipeline + Valor Inventario + Pipeline USD + Inversión Sugerida
-  // Fila 2: SKUs Activos + Clase A + Agotados + Críticos + Stock Bajo
+  // Fila 1 (6 tarjetas): Pipeline + Valor Inventario + Pipeline USD + Inversión Sugerida
+  // Fila 2 (6 tarjetas): SKUs Activos + Clase A + Agotados + Críticos + Stock Bajo + Nunca Vendido
+  const colsPipeline = hasPipeline ? 6 : 3;
   document.getElementById('dash-cards').innerHTML = `
-    <div style="width:100%;display:contents;">
+    <div style="display:grid;grid-template-columns:repeat(${colsPipeline},1fr);gap:16px;margin-bottom:16px;">
       ${hasPipeline ? `<div class="card"><div class="card-label">En Tránsito</div><div class="card-value" style="color:#4f8ef7">${totalTransito.toLocaleString()}</div><div class="card-sub">unidades</div></div>` : ''}
       ${hasPipeline ? `<div class="card"><div class="card-label">En Fiscal</div><div class="card-value" style="color:#eab308">${totalFiscal.toLocaleString()}</div><div class="card-sub">unidades</div></div>` : ''}
       ${hasPipeline ? `<div class="card"><div class="card-label">Órdenes Abiertas</div><div class="card-value" style="color:#f97316">${totalOA.toLocaleString()}</div><div class="card-sub">unidades comprometidas</div></div>` : ''}
       <div class="card"><div class="card-label">Valor Inventario</div><div class="card-value" style="font-size:20px;">$${fmtUSD(totalValor)}</div><div class="card-sub">USD costo en bodega</div></div>
       ${hasPipeline ? `<div class="card"><div class="card-label">Valor en Pipeline</div><div class="card-value" style="color:#7c5af7;font-size:20px;">$${fmtUSD(totalPipeUSD)}</div><div class="card-sub">Tránsito + Fiscal + OA</div></div>` : ''}
       <div class="card green"><div class="card-label">Inversión Sugerida Neta</div><div class="card-value" style="font-size:20px;">$${fmtUSD(totalCompra)}</div><div class="card-sub">Descontando pipeline</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-bottom:24px;">
       <div class="card blue"><div class="card-label">SKUs Activos</div><div class="card-value">${d.length.toLocaleString()}</div><div class="card-sub">Con stock: ${conStock.toLocaleString()}</div></div>
-      <div class="card"><div class="card-label">SKUs Clase A</div><div class="card-value">${skusA}</div><div class="card-sub">${((skusA/d.length)*100).toFixed(1)}% genera 80% ventas</div></div>
+      <div class="card"><div class="card-label">SKUs Clase A</div><div class="card-value">${skusA}</div><div class="card-sub">${d.length>0?((skusA/d.length)*100).toFixed(1):0}% genera 80% ventas</div></div>
       <div class="card red"><div class="card-label">Agotados</div><div class="card-value">${agotados}</div><div class="card-sub">SKUs en cero</div></div>
-      <div class="card orange"><div class="card-label">Críticos</div><div class="card-value">${criticos}</div><div class="card-sub">DOI < stock seguridad</div></div>
-      <div class="card yellow"><div class="card-label">Stock Bajo</div><div class="card-value">${bajos}</div><div class="card-sub">DOI < lead time + seguridad</div></div>
+      <div class="card orange"><div class="card-label">Críticos</div><div class="card-value">${criticos}</div><div class="card-sub">DOI &lt; stock seguridad</div></div>
+      <div class="card yellow"><div class="card-label">Stock Bajo</div><div class="card-value">${bajos}</div><div class="card-sub">DOI &lt; lead time + seguridad</div></div>
+      <div class="card" style="border-color:#64748b40;"><div class="card-label">SKU Nunca Vendido</div><div class="card-value" style="color:#64748b">${skusNuncaVendido}</div><div class="card-sub">Con stock, sin historial de ventas</div></div>
     </div>
   `;
 
@@ -1544,21 +1576,55 @@ function renderPipeline(view) {
     <div class="card"><div class="card-label">💰 Valor Total Pipeline</div><div class="card-value" style="color:#7c5af7;font-size:20px;">$${fmtUSD(totalPipeUSD)}</div><div class="card-sub">USD facturado en tránsito</div></div>
   `;
 
+  // sortable table wrap: headers = [{label, col, right?}], tableId for sort wiring
+  const sortableWrap = (tableId, headers, rows, note, viewKey) => {
+    const s = PIPE_SORT[viewKey] || {};
+    const thHtml = headers.map(h => {
+      const isSorted = h.col && h.col === s.col;
+      const arrow = isSorted ? (s.dir===1?'↑':'↓') : '↕';
+      const cls = [(h.right?'text-right':''), (isSorted?'sorted':'')].filter(Boolean).join(' ');
+      return h.col
+        ? `<th data-psort="${h.col}" data-pview="${viewKey}" class="${cls}" style="cursor:pointer;">${h.label} <span class="sort-arrow">${arrow}</span></th>`
+        : `<th class="${h.right?'text-right':''}">${h.label}</th>`;
+    }).join('');
+    return `<div class="table-wrap">
+      ${note ? `<div style="padding:12px 20px;font-size:12px;color:var(--text2);border-bottom:1px solid var(--border);">${note}</div>` : ''}
+      <div class="table-scroll"><table id="${tableId}" style="min-width:1100px;"><thead><tr>${thHtml}</tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    </div>`;
+  };
   const tableWrap = (headers, rows, note) => `
     <div class="table-wrap">
       ${note ? `<div style="padding:12px 20px;font-size:12px;color:var(--text2);border-bottom:1px solid var(--border);">${note}</div>` : ''}
-      <table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
-      <tbody>${rows}</tbody></table>
+      <div class="table-scroll"><table style="min-width:900px;"><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+      <tbody>${rows}</tbody></table></div>
     </div>`;
 
   const pipeCount = d.filter(r=>r.pipelineTotal>0).length;
   if (document.getElementById('pipe-count')) document.getElementById('pipe-count').textContent = `${pipeCount} SKUs con pipeline`;
 
   if (view === 'consolidado') {
-    const items = d.filter(r=>r.pipelineTotal>0).sort((a,b)=>b.pipelineTotal-a.pipelineTotal);
-    container.innerHTML = tableWrap(
-      ['SKU','Descripción','Categoría','Subcategoría','Proveedor','Clase','Stock Actual','🚢 Tránsito','🏛 Fiscal','📋 OA','Total Pipeline','DOI Actual','DOI+Pipeline','DOI Obj','Estado'],
-      items.map(r=>`<tr>
+    const { col: pc, dir: pd } = PIPE_SORT.consolidado;
+    const claseOrder = {A:0,B:1,C:2,D:3,Nuevo:4};
+    const items = d.filter(r=>r.pipelineTotal>0).sort((a,b) => {
+      let va = a[pc]??0, vb = b[pc]??0;
+      if (pc==='clase') { va=claseOrder[a.clase]??9; vb=claseOrder[b.clase]??9; }
+      if (pc==='doi') { va=a.doi??9999; vb=b.doi??9999; }
+      if (pc==='doiConPipeline') { va=a.doiConPipeline??9999; vb=b.doiConPipeline??9999; }
+      if (typeof va==='string') return pd*va.localeCompare(vb);
+      return pd*(va-vb);
+    });
+    const hdr = [
+      {label:'SKU',col:'Articulo'},{label:'Descripción',col:'DESCRIPCION'},
+      {label:'Categoría',col:'Categoria'},{label:'Subcategoría',col:'Subcategoria'},
+      {label:'Proveedor',col:'Supplier'},{label:'Clase',col:'clase'},
+      {label:'Stock',col:'stock',right:true},{label:'🚢 Tránsito',col:'unitsTransito',right:true},
+      {label:'🏛 Fiscal',col:'unitsFiscal',right:true},{label:'📋 OA',col:'unitsOA',right:true},
+      {label:'Total Pipeline',col:'pipelineTotal',right:true},
+      {label:'DOI Actual',col:'doi',right:true},{label:'DOI+Pipeline',col:'doiConPipeline',right:true},
+      {label:'DOI Obj',col:'doiObjetivo',right:true},{label:'Estado',col:'status'}
+    ];
+    container.innerHTML = sortableWrap('tbl-pipe-consolidado', hdr, items.map(r=>`<tr>
         <td><span class="tag">${r.Articulo}</span></td>
         <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;" title="${r.DESCRIPCION}">${r.DESCRIPCION}</td>
         <td>${r.Categoria}</td><td>${r.Subcategoria}</td><td>${r.Supplier||'—'}</td>
@@ -1573,15 +1639,26 @@ function renderPipeline(view) {
         <td class="text-right text-gray">${r.doiObjetivo}</td>
         <td class="${'status-'+r.status}">${statusLabel(r.status)}</td>
       </tr>`).join(''),
-      `Tránsito = ya embarcado · Fiscal = en aduana · OA = orden abierta (aún no embarcada)`
+      `Tránsito = ya embarcado · Fiscal = en aduana · OA = orden abierta (aún no embarcada)`,
+      'consolidado'
     );
 
   } else if (view === 'transito') {
-    const items = DB.trans.filter(r=>pipeSkus.has(r['Codigo Articulo']) && ((r.Estatus||'').toLowerCase().includes('tránsito')||!(r.Estatus||'').toLowerCase().includes('fiscal')))
-      .sort((a,b)=>new Date(a.ETA)-new Date(b.ETA));
-    container.innerHTML = tableWrap(
-      ['Doc','Fecha','Proveedor','SKU','Descripción','Unidades','Monto USD','ETD','ETA','Estado'],
-      items.map(r=>`<tr>
+    const { col: tc, dir: td } = PIPE_SORT.transito;
+    const rawT = DB.trans.filter(r=>pipeSkus.has(r['Codigo Articulo']) && ((r.Estatus||'').toLowerCase().includes('tránsito')||!(r.Estatus||'').toLowerCase().includes('fiscal')));
+    rawT.sort((a,b) => {
+      let va = a[tc]??'', vb = b[tc]??'';
+      if (tc==='Qty Pend'||tc==='Monto Facturado USD') { va=parseNum(a[tc]); vb=parseNum(b[tc]); return td*(va-vb); }
+      if (tc==='ETA'||tc==='ETD'||tc==='Fecha') { va=new Date(a[tc]||0); vb=new Date(b[tc]||0); return td*(va-vb); }
+      return td*String(va).localeCompare(String(vb));
+    });
+    const hdrT = [
+      {label:'Doc',col:'DocNum'},{label:'Fecha',col:'Fecha'},{label:'Proveedor',col:'Proveedor'},
+      {label:'SKU',col:'Codigo Articulo'},{label:'Descripción',col:'Dscription'},
+      {label:'Unidades',col:'Qty Pend',right:true},{label:'Monto USD',col:'Monto Facturado USD',right:true},
+      {label:'ETD',col:'ETD'},{label:'ETA',col:'ETA',right:true},{label:'Estado'}
+    ];
+    container.innerHTML = sortableWrap('tbl-pipe-transito', hdrT, rawT.map(r=>`<tr>
         <td><span class="tag">${r.DocNum}</span></td>
         <td>${fmtDate(r.Fecha)}</td>
         <td>${r.Proveedor}</td>
@@ -1593,19 +1670,30 @@ function renderPipeline(view) {
         <td class="text-right bold">${fmtDate(r.ETA)}</td>
         <td><span class="badge badge-B">Tránsito</span></td>
       </tr>`).join(''),
-      `Mercancía ya embarcada, en camino hacia Costa Rica. ETD = fecha de salida · ETA = fecha estimada de llegada`
+      `Mercancía ya embarcada, en camino hacia Costa Rica. ETD = fecha de salida · ETA = fecha estimada de llegada`,
+      'transito'
     );
 
   } else if (view === 'fiscal') {
-    const items = DB.trans.filter(r=>pipeSkus.has(r['Codigo Articulo']) && (r.Estatus||'').toLowerCase().includes('fiscal'))
-      .sort((a,b)=>new Date(a.ETA)-new Date(b.ETA));
-    if (items.length === 0) {
+    const { col: fc, dir: fd } = PIPE_SORT.fiscal;
+    const rawF = DB.trans.filter(r=>pipeSkus.has(r['Codigo Articulo']) && (r.Estatus||'').toLowerCase().includes('fiscal'));
+    if (rawF.length === 0) {
       container.innerHTML = `<div class="empty-state"><div class="icon">🏛</div><p>No hay mercancía en almacén fiscal registrada</p></div>`;
       return;
     }
-    container.innerHTML = tableWrap(
-      ['Doc','Fecha','Proveedor','SKU','Descripción','Unidades','Monto USD','ETA','Fecha Fiscal','Estado'],
-      items.map(r=>`<tr>
+    rawF.sort((a,b) => {
+      let va = a[fc]??'', vb = b[fc]??'';
+      if (fc==='Qty Pend'||fc==='Monto Facturado USD') { va=parseNum(a[fc]); vb=parseNum(b[fc]); return fd*(va-vb); }
+      if (fc==='ETA'||fc==='ETD'||fc==='Fecha'||fc==='Fecha Fiscal') { va=new Date(a[fc]||0); vb=new Date(b[fc]||0); return fd*(va-vb); }
+      return fd*String(va).localeCompare(String(vb));
+    });
+    const hdrF = [
+      {label:'Doc',col:'DocNum'},{label:'Fecha',col:'Fecha'},{label:'Proveedor',col:'Proveedor'},
+      {label:'SKU',col:'Codigo Articulo'},{label:'Descripción',col:'Dscription'},
+      {label:'Unidades',col:'Qty Pend',right:true},{label:'Monto USD',col:'Monto Facturado USD',right:true},
+      {label:'ETA',col:'ETA'},{label:'Fecha Fiscal',col:'Fecha Fiscal',right:true},{label:'Estado'}
+    ];
+    container.innerHTML = sortableWrap('tbl-pipe-fiscal', hdrF, rawF.map(r=>`<tr>
         <td><span class="tag">${r.DocNum}</span></td>
         <td>${fmtDate(r.Fecha)}</td>
         <td>${r.Proveedor}</td>
@@ -1617,17 +1705,27 @@ function renderPipeline(view) {
         <td class="text-right bold text-yellow">${fmtDate(r['Fecha Fiscal']) || '—'}</td>
         <td><span class="badge badge-C">Almacén Fiscal</span></td>
       </tr>`).join(''),
-      `Mercancía llegada, en proceso de desaduanización. Fecha Fiscal = fecha de ingreso al almacén fiscal`
+      `Mercancía llegada, en proceso de desaduanización. Fecha Fiscal = fecha de ingreso al almacén fiscal`,
+      'fiscal'
     );
 
   } else if (view === 'oa') {
-    const items = DB.oa.filter(r=>pipeSkus.has(r.CODIGO)).sort((a,b)=>{
-      const ea = new Date(a.ETA||'9999'); const eb = new Date(b.ETA||'9999');
-      return ea - eb;
+    const { col: oc, dir: od } = PIPE_SORT.oa;
+    const rawOA2 = DB.oa.filter(r=>pipeSkus.has(r.CODIGO));
+    rawOA2.sort((a,b) => {
+      let va = a[oc]??'', vb = b[oc]??'';
+      if (oc==='Unds'||oc==='Monto USD'||oc==='Monto CRC') { va=parseNum(a[oc]); vb=parseNum(b[oc]); return od*(va-vb); }
+      if (oc==='ETA'||oc==='ETD'||oc==='Fecha') { va=new Date(a[oc]||'9999'); vb=new Date(b[oc]||'9999'); return od*(va-vb); }
+      return od*String(va).localeCompare(String(vb));
     });
-    container.innerHTML = tableWrap(
-      ['Factura','Fecha','Proveedor','SKU','Descripción','Marca','Grupo','Unidades','Monto USD ($)','Monto CRC (₡)','ETD','ETA'],
-      items.map(r=>`<tr>
+    const hdrOA = [
+      {label:'Factura',col:'Factura'},{label:'Fecha',col:'Fecha'},{label:'Proveedor',col:'Proveedor'},
+      {label:'SKU',col:'CODIGO'},{label:'Descripción',col:'Descripción'},
+      {label:'Marca',col:'MARCA'},{label:'Grupo',col:'GRUPO'},
+      {label:'Unidades',col:'Unds',right:true},{label:'Monto USD',col:'Monto USD',right:true},
+      {label:'Monto CRC',col:'Monto CRC',right:true},{label:'ETD',col:'ETD'},{label:'ETA',col:'ETA',right:true}
+    ];
+    container.innerHTML = sortableWrap('tbl-pipe-oa', hdrOA, rawOA2.map(r=>`<tr>
         <td><span class="tag">${r.Factura}</span></td>
         <td>${fmtDate(r.Fecha)}</td>
         <td>${r.Proveedor}</td>
@@ -1640,7 +1738,8 @@ function renderPipeline(view) {
         <td>${fmtDate(r.ETD)||'—'}</td>
         <td class="text-right bold">${fmtDate(r.ETA)||'—'}</td>
       </tr>`).join(''),
-      `Órdenes de compra confirmadas aún no embarcadas. ETD = estimated time of departure · ETA = estimated time of arrival`
+      `Órdenes de compra confirmadas aún no embarcadas. ETD = estimated time of departure · ETA = estimated time of arrival`,
+      'oa'
     );
 
   } else if (view === 'timeline') {
@@ -1731,9 +1830,23 @@ function renderAbcd() {
 
   ['abcd-cat','abcd-subcat','abcd-marca','abcd-grupo','abcd-grupopres','abcd-clase','abcd-pm'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.onchange = renderAbcdTable;
+    if (el) el.onchange = () => { ABCD_PAGE=1; renderAbcdTable(); };
   });
   document.getElementById('abcd-cat').addEventListener('change', () => updateSubcatFilter('abcd-cat','abcd-subcat'));
+
+  // Wire ABCD table sort
+  setTimeout(() => {
+    document.querySelectorAll('#tbl-abcd th[data-acol]').forEach(th => {
+      th.style.cursor = 'pointer';
+      th.onclick = () => {
+        const c = th.dataset.acol;
+        ABCD_SORT.dir = ABCD_SORT.col === c ? ABCD_SORT.dir * -1 : -1;
+        ABCD_SORT.col = c;
+        ABCD_PAGE = 1;
+        renderAbcdTable();
+      };
+    });
+  }, 0);
 }
 
 function renderAbcdTable() {
@@ -1744,6 +1857,7 @@ function renderAbcdTable() {
   const grupopres = document.getElementById('abcd-grupopres').value;
   const clase     = document.getElementById('abcd-clase').value;
   const pm        = document.getElementById('abcd-pm')?.value || '';
+  const claseOrder = {A:0,B:1,C:2,D:3,Nuevo:4};
   abcdFiltered = [...DB.processed].sort((a,b)=>b.ventaUSDtotal-a.ventaUSDtotal).filter(r => {
     if (cat       && r.Categoria !== cat) return false;
     if (subcat    && r.Subcategoria !== subcat) return false;
@@ -1754,6 +1868,14 @@ function renderAbcdTable() {
     if (pm        && r.productManager !== pm) return false;
     if (!r.ventaUSDtotal && r.clase !== 'D') return false;
     return true;
+  });
+  // Apply ABCD sort
+  const { col: acol, dir: adir } = ABCD_SORT;
+  abcdFiltered.sort((a, b) => {
+    let va = a[acol] ?? 0, vb = b[acol] ?? 0;
+    if (acol === 'clase') { va = claseOrder[a.clase]??9; vb = claseOrder[b.clase]??9; }
+    if (typeof va === 'string') return adir * va.localeCompare(vb);
+    return adir * (va - vb);
   });
   const total = abcdFiltered.length;
   const pages = Math.ceil(total / ABCD_PAGE_SIZE);
@@ -1775,6 +1897,13 @@ function renderAbcdTable() {
     <button onclick="abcdPage(${ABCD_PAGE-1})" ${ABCD_PAGE<=1?'disabled':''}>‹ Ant</button>
     <span class="page-info">Pág ${ABCD_PAGE} de ${pages} · ${total.toLocaleString()} registros</span>
     <button onclick="abcdPage(${ABCD_PAGE+1})" ${ABCD_PAGE>=pages?'disabled':''}>Sig ›</button>`;
+  // Update sort arrows
+  document.querySelectorAll('#tbl-abcd th[data-acol]').forEach(th => {
+    const arrow = th.querySelector('.sort-arrow');
+    if (!arrow) return;
+    arrow.textContent = th.dataset.acol === acol ? (adir===1?'↑':'↓') : '↕';
+    th.classList.toggle('sorted', th.dataset.acol === acol);
+  });
 }
 function abcdPage(p) { ABCD_PAGE = p; renderAbcdTable(); }
 
